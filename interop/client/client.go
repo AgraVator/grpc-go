@@ -28,6 +28,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -288,8 +289,10 @@ func main() {
 		}
 		opts = append(opts, grpc.WithUnaryInterceptor(unaryAddMd), grpc.WithStreamInterceptor(streamingAddMd))
 	}
+	fmt.Printf("[OTEL_DEBUG][CLIENT] Running client with enableOpenTelemetry=%v, otelCollectorAddress=%q, testCase=%q\n", *enableOpenTelemetry, *otelCollectorAddress, *testCase)
 	tp, propagator, shutdownFunc := interop.SetupOpenTelemetry(*enableOpenTelemetry, *otelCollectorAddress, logger)
 	if tp != nil {
+		fmt.Printf("[OTEL_DEBUG][CLIENT] SetupOpenTelemetry returned non-nil TracerProvider. Registering grpcotel.DialOption!\n")
 		defer shutdownFunc()
 		opts = append(opts, grpcotel.DialOption(grpcotel.Options{
 			TraceOptions: oteltracing.TraceOptions{
@@ -297,7 +300,10 @@ func main() {
 				TextMapPropagator: propagator,
 			},
 		}))
+	} else {
+		fmt.Printf("[OTEL_DEBUG][CLIENT] SetupOpenTelemetry returned nil TracerProvider. Tracing not enabled on dial options.\n")
 	}
+	fmt.Printf("[OTEL_DEBUG][CLIENT] Dialing server %q with %d options...\n", serverAddr, len(opts))
 	conn, err := grpc.NewClient(serverAddr, opts...)
 	if err != nil {
 		logger.Fatalf("grpc.NewClient(%q) = %v", serverAddr, err)
@@ -306,6 +312,7 @@ func main() {
 	tc := testgrpc.NewTestServiceClient(conn)
 	ctxWithDeadline, cancel := context.WithTimeout(ctx, time.Duration(*soakOverallTimeoutSeconds)*time.Second)
 	defer cancel()
+	fmt.Printf("[OTEL_DEBUG][CLIENT] Executing test case %q...\n", *testCase)
 	switch *testCase {
 	case "empty_unary":
 		interop.DoEmptyUnaryCall(ctx, tc)

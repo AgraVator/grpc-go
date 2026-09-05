@@ -25,6 +25,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -70,9 +71,11 @@ func main() {
 		logger.Fatalf("failed to listen: %v", err)
 	}
 	logger.Infof("interop server listening on %v", lis.Addr())
+	fmt.Printf("[OTEL_DEBUG][SERVER] Server starting on %v with enableOpenTelemetry=%v, otelCollectorAddress=%q\n", lis.Addr(), *enableOpenTelemetry, *otelCollectorAddress)
 	opts := []grpc.ServerOption{orca.CallMetricsServerOption(nil)}
 	tp, propagator, shutdownFunc := interop.SetupOpenTelemetry(*enableOpenTelemetry, *otelCollectorAddress, logger)
 	if tp != nil {
+		fmt.Printf("[OTEL_DEBUG][SERVER] SetupOpenTelemetry returned non-nil TracerProvider. Registering grpcotel.ServerOption!\n")
 		defer shutdownFunc()
 		opts = append(opts, grpcotel.ServerOption(grpcotel.Options{
 			TraceOptions: oteltracing.TraceOptions{
@@ -80,6 +83,8 @@ func main() {
 				TextMapPropagator: propagator,
 			},
 		}))
+	} else {
+		fmt.Printf("[OTEL_DEBUG][SERVER] SetupOpenTelemetry returned nil TracerProvider. Tracing not enabled on server options.\n")
 	}
 	if *useTLS {
 		if *certFile == "" {
@@ -101,6 +106,7 @@ func main() {
 		altsTC := alts.NewServerCreds(altsOpts)
 		opts = append(opts, grpc.Creds(altsTC))
 	}
+	fmt.Printf("[OTEL_DEBUG][SERVER] Creating gRPC server with %d options...\n", len(opts))
 	server := grpc.NewServer(opts...)
 	metricsRecorder := orca.NewServerMetricsRecorder()
 	sopts := orca.ServiceOptions{
@@ -114,9 +120,12 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
+		fmt.Printf("[OTEL_DEBUG][SERVER] Caught signal, beginning graceful stop...\n")
 		go server.GracefulStop()
 		time.Sleep(5 * time.Second)
+		fmt.Printf("[OTEL_DEBUG][SERVER] Fallback timeout elapsed, calling server.Stop()...\n")
 		server.Stop()
 	}()
+	fmt.Printf("[OTEL_DEBUG][SERVER] Calling server.Serve()...\n")
 	server.Serve(lis)
 }
